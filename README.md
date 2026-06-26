@@ -26,20 +26,54 @@ structure Config : sig
   val string : string -> string reader
   val int    : string -> int reader
   val bool   : string -> bool reader
+  val real   : string -> real reader
+  val char   : string -> char reader
+  val oneOf  : string -> string list -> string reader
+  val listOf : char -> string -> string list reader
+  val csv    : string -> string list reader
   val stringOr : string -> string -> string reader
   val intOr    : string -> int -> int reader
   val boolOr   : string -> bool -> bool reader
+  val realOr   : string -> real -> real reader
+  val charOr   : string -> char -> char reader
   val optional : 'a reader -> 'a option reader
+  val withDefault : 'a -> 'a reader -> 'a reader
   val pure : 'a -> 'a reader
   val map  : ('a -> 'b) -> 'a reader -> 'b reader
   val ap   : ('a -> 'b) reader -> 'a reader -> 'b reader
   val both : 'a reader -> 'b reader -> ('a * 'b) reader
+  val andThen : 'a reader -> ('a -> 'b reader) -> 'b reader
+  val bind    : 'a reader -> ('a -> 'b reader) -> 'b reader
+  val satisfy : ('a -> bool) -> string -> 'a reader -> 'a reader
+  val ensure  : ('a -> bool) -> string -> 'a reader -> 'a reader
+  val prefixed : string -> 'a reader -> 'a reader
+  val section  : string -> 'a reader -> 'a reader
+  val unusedKeys : string list -> source -> string list
   val run  : 'a reader -> source -> 'a outcome
 end
 ```
 
 `bool` accepts `true/false`, `1/0`, `yes/no`, `on/off` (case-insensitive).
-`int` is strict: an optional sign followed by digits only.
+`int`/`real` are strict: an optional sign followed by a valid number with no
+trailing junk (`"12ab"` and `"1.2x"` are rejected). `char` requires exactly one
+character. `oneOf key allowed` is an enum reader. `listOf sep`/`csv` split a
+value and trim each element (an empty value yields `[]`).
+
+### Combinators
+
+- **Applicative** (`pure`/`map`/`ap`/`both`): error-**accumulating** -- a single
+  `run` reports *every* missing or malformed key at once.
+- **Monadic** (`andThen`/`bind`): short-circuits on the first error, so it does
+  **not** accumulate. Use it when a later reader depends on an earlier value.
+- **Validation** (`ensure pred msg r` / `satisfy`): turns a successful value into
+  `Err [msg]` unless it satisfies `pred`.
+- **Defaults** (`withDefault d r`): recovers from *any* error with `d`;
+  `stringOr`/`intOr`/`boolOr`/`realOr`/`charOr` default only on a *missing* key.
+- **Scoping** (`prefixed pfx r` / `section name r`): runs `r` against a sub-source
+  containing only keys under the prefix, with the prefix stripped. `section "db"`
+  is `prefixed "db."`.
+- **Schema check** (`unusedKeys expected src`): lists distinct source keys not in
+  `expected` (handy for catching typos), since readers do not track consumed keys.
 
 ### Example
 
@@ -56,6 +90,23 @@ val cfg =
   case Config.run reader env of
       Config.Ok c => c
     | Config.Err errs => raise Fail (String.concatWith "; " errs)
+```
+
+### Validation, scoping, and enums
+
+```sml
+(* Port must be in range; oneOf restricts to an enum. *)
+val portR = Config.ensure (fn p => p > 0 andalso p < 65536) "port out of range"
+              (Config.int "PORT")
+val modeR = Config.oneOf "MODE" ["debug", "release"]
+
+(* Scope a reader to a "db." section of the source. *)
+val dbHost = Config.section "db" (Config.string "host")
+val src = [("db.host", "localhost"), ("db.port", "5432")]
+val Config.Ok host = Config.run dbHost src    (* "localhost" *)
+
+(* Catch typos: keys present but not expected. *)
+val typos = Config.unusedKeys ["PORT", "HOST"] env
 ```
 
 ## Build & test
@@ -79,10 +130,12 @@ own `.mlb`, or feed `sources.mlb` to `tools/polybuild` (Poly/ML).
 
 ## Tests
 
-26 deterministic checks: dotenv parsing (comments, blanks, trimming,
-quoting, last-duplicate-wins), strict typed readers, signed/negative ints,
-defaults and `optional`, and applicative error accumulation building a
-record. Run `make all-tests`.
+53 deterministic checks: dotenv parsing (comments, blanks, trimming,
+quoting, last-duplicate-wins), strict typed readers (`int`/`real`/`char`),
+signed/negative ints, defaults/`optional`/`withDefault`, applicative error
+accumulation building a record, `oneOf` enums, `listOf`/`csv` splitting,
+`ensure`/`satisfy` validation, `andThen` short-circuiting, `prefixed`/`section`
+scoping, and `unusedKeys` schema checks. Run `make all-tests`.
 
 ## License
 

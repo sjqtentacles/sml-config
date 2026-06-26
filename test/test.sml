@@ -2,8 +2,8 @@
 
 structure ConfigTests =
 struct
-  open Harness
   open Config  (* brings Ok / Err and the readers into scope *)
+  open Harness
 
   fun checkResultInt name (expected, actual) =
     case (expected, actual) of
@@ -79,6 +79,91 @@ struct
                        checkInt "record port" (8080, port);
                        checkBool "record debug" (true, debug))
                   | Err _ => check "record built" false)
+
+      val () = section "real / char readers"
+      val rsrc = [("RATE", "0.25"), ("PI", "3.14159"), ("NEG", "-2.5"),
+                  ("BADR", "1.2x"), ("FLAG", "Y"), ("MULTI", "ab")]
+      val () = checkBool "real ok"
+                 (true, (case Config.run (Config.real "RATE") rsrc of
+                             Ok r => Real.abs (r - 0.25) < 1E~9 | _ => false))
+      val () = checkBool "real negative"
+                 (true, (case Config.run (Config.real "NEG") rsrc of
+                             Ok r => Real.abs (r - ~2.5) < 1E~9 | _ => false))
+      val () = checkBool "real trailing junk rejected"
+                 (true, (case Config.run (Config.real "BADR") rsrc of Err _ => true | _ => false))
+      val () = checkBool "real missing -> error"
+                 (true, (case Config.run (Config.real "MISSING") rsrc of Err _ => true | _ => false))
+      val () = checkBool "realOr default"
+                 (true, (case Config.run (Config.realOr "MISSING" 1.5) rsrc of
+                             Ok r => Real.abs (r - 1.5) < 1E~9 | _ => false))
+      val () = checkBool "char ok"
+                 (true, (case Config.run (Config.char "FLAG") rsrc of Ok #"Y" => true | _ => false))
+      val () = checkBool "char multi -> error"
+                 (true, (case Config.run (Config.char "MULTI") rsrc of Err _ => true | _ => false))
+      val () = checkBool "charOr default"
+                 (true, (case Config.run (Config.charOr "MISSING" #"?") rsrc of Ok #"?" => true | _ => false))
+
+      val () = section "oneOf enum reader"
+      val esrc = [("MODE", "fast"), ("LVL", "warn")]
+      val () = checkBool "oneOf accepts allowed"
+                 (true, (case Config.run (Config.oneOf "MODE" ["slow","fast"]) esrc of
+                             Ok "fast" => true | _ => false))
+      val () = checkBool "oneOf rejects disallowed"
+                 (true, (case Config.run (Config.oneOf "LVL" ["debug","info"]) esrc of Err _ => true | _ => false))
+      val () = checkBool "oneOf missing -> error"
+                 (true, (case Config.run (Config.oneOf "X" ["a"]) esrc of Err _ => true | _ => false))
+
+      val () = section "listOf / csv readers"
+      val lsrc = [("TAGS", "a, b ,c"), ("PIPES", "x|y|z"), ("EMPTY", "")]
+      val () = checkStringList "csv trims elements"
+                 (["a","b","c"], (case Config.run (Config.csv "TAGS") lsrc of Ok xs => xs | _ => ["FAIL"]))
+      val () = checkStringList "listOf custom separator"
+                 (["x","y","z"], (case Config.run (Config.listOf #"|" "PIPES") lsrc of Ok xs => xs | _ => ["FAIL"]))
+      val () = checkBool "listOf empty -> []"
+                 (true, (case Config.run (Config.csv "EMPTY") lsrc of Ok [] => true | _ => false))
+
+      val () = section "ensure / satisfy validation"
+      val vsrc = [("PORT", "8080"), ("LOW", "10"), ("NAME", "ok")]
+      val () = checkResultInt "ensure passes"
+                 (Ok 8080, Config.run (Config.ensure (fn p => p > 0) "port>0" (Config.int "PORT")) vsrc)
+      val () = checkBool "ensure fails"
+                 (true, (case Config.run (Config.ensure (fn p => p > 1000) "port>1000" (Config.int "LOW")) vsrc of
+                             Err ["port>1000"] => true | _ => false))
+      val () = checkBool "satisfy passes"
+                 (true, (case Config.run (Config.satisfy (fn s => s <> "") "nonempty" (Config.string "NAME")) vsrc of
+                             Ok "ok" => true | _ => false))
+
+      val () = section "andThen / withDefault"
+      val () = checkResultInt "andThen chains"
+                 (Ok 8081,
+                  Config.run (Config.andThen (Config.int "PORT") (fn p => Config.pure (p + 1))) vsrc)
+      val () = checkBool "andThen short-circuits on error"
+                 (true, (case Config.run (Config.andThen (Config.int "MISSING") (fn p => Config.pure p)) vsrc of
+                             Err _ => true | _ => false))
+      val () = checkResultInt "withDefault recovers"
+                 (Ok 99, Config.run (Config.withDefault 99 (Config.int "MISSING")) vsrc)
+      val () = checkResultInt "withDefault keeps value"
+                 (Ok 8080, Config.run (Config.withDefault 99 (Config.int "PORT")) vsrc)
+
+      val () = section "prefixed / section scoping"
+      val psrc = [("db.host", "localhost"), ("db.port", "5432"), ("web.port", "80")]
+      val () = checkResultInt "prefixed strips prefix"
+                 (Ok 5432, Config.run (Config.prefixed "db." (Config.int "port")) psrc)
+      val () = checkBool "prefixed string"
+                 (true, (case Config.run (Config.prefixed "db." (Config.string "host")) psrc of
+                             Ok "localhost" => true | _ => false))
+      val () = checkResultInt "section adds trailing dot"
+                 (Ok 80, Config.run (Config.section "web" (Config.int "port")) psrc)
+      val () = checkBool "section isolates scope (db.host not visible in web)"
+                 (true, (case Config.run (Config.section "web" (Config.string "host")) psrc of
+                             Err _ => true | _ => false))
+
+      val () = section "unusedKeys schema check"
+      val usrc = [("PORT", "8080"), ("HOST", "x"), ("TYPO", "?"), ("EXTRA", "!")]
+      val () = checkStringList "reports unused keys in order"
+                 (["TYPO","EXTRA"], Config.unusedKeys ["PORT","HOST"] usrc)
+      val () = checkBool "no unused when all expected"
+                 (true, Config.unusedKeys ["PORT","HOST","TYPO","EXTRA"] usrc = [])
     in
       ()
     end

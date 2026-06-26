@@ -137,5 +137,105 @@ struct
   fun optional r =
     fn src => (case r src of Ok x => Ok (SOME x) | Err _ => Ok NONE)
 
+  fun withDefault default r =
+    fn src => (case r src of Ok x => Ok x | Err _ => Ok default)
+
+  (* real: accept SML real syntax but reject any trailing junk after the number. *)
+  fun parseRealStrict raw =
+    let
+      val s = trim raw
+      (* A reader over (string, index): yields chars and the remaining index. *)
+      fun rdr i = if i < String.size s then SOME (String.sub (s, i), i + 1) else NONE
+    in
+      case Real.scan rdr 0 of
+          SOME (r, i) => if i = String.size s then SOME r else NONE
+        | NONE => NONE
+    end
+
+  fun real key =
+    fn src =>
+      (case getStringOpt src key of
+           NONE => missing key
+         | SOME v => (case parseRealStrict v of SOME r => Ok r | NONE => malformed key "real" v))
+
+  fun char key =
+    fn src =>
+      (case getStringOpt src key of
+           NONE => missing key
+         | SOME v => if String.size v = 1 then Ok (String.sub (v, 0))
+                     else malformed key "char" v)
+
+  fun realOr key default =
+    fn src => (case getStringOpt src key of NONE => Ok default | SOME _ => real key src)
+
+  fun charOr key default =
+    fn src => (case getStringOpt src key of NONE => Ok default | SOME _ => char key src)
+
+  fun oneOf key allowed =
+    fn src =>
+      (case getStringOpt src key of
+           NONE => missing key
+         | SOME v =>
+             if List.exists (fn a => a = v) allowed then Ok v
+             else Err ["key " ^ key ^ " must be one of {"
+                       ^ String.concatWith ", " allowed ^ "} but was \"" ^ v ^ "\""])
+
+  fun listOf sep key =
+    fn src =>
+      (case getStringOpt src key of
+           NONE => missing key
+         | SOME v =>
+             if v = "" then Ok []
+             else Ok (List.map trim (String.fields (fn c => c = sep) v)))
+
+  fun csv key = listOf #"," key
+
+  (* monadic sequencing (short-circuits) *)
+  fun andThen r f =
+    fn src => (case r src of Ok x => (f x) src | Err e => Err e)
+  fun bind r f = andThen r f
+
+  fun ensure pred msg r =
+    fn src => (case r src of
+                   Ok x => if pred x then Ok x else Err [msg]
+                 | Err e => Err e)
+
+  fun satisfy pred msg r =
+    fn src => (case r src of
+                   Ok x => if pred x then Ok x else Err [msg]
+                 | Err e => Err e)
+
+  (* prefix scoping: build a sub-source of keys with the prefix stripped *)
+  fun prefixed pfx r =
+    fn src =>
+      let
+        val sub =
+          List.mapPartial
+            (fn (k, v) =>
+               if String.isPrefix pfx k
+               then SOME (String.extract (k, String.size pfx, NONE), v)
+               else NONE)
+            src
+      in
+        r sub
+      end
+
+  fun section name r =
+    let val pfx = if String.isSuffix "." name then name else name ^ "."
+    in prefixed pfx r end
+
+  fun unusedKeys expected (src : source) =
+    let
+      (* distinct source keys not in [expected] *)
+      fun seen k acc = List.exists (fn x => x = k) acc
+      fun go [] acc = List.rev acc
+        | go ((k, _) :: rest) acc =
+            if List.exists (fn e => e = k) expected orelse seen k acc
+            then go rest acc
+            else go rest (k :: acc)
+    in
+      go src []
+    end
+
   fun run r src = r src
 end
