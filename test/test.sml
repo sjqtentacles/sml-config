@@ -47,6 +47,28 @@ struct
       val () = checkResultInt "plus sign" (Ok 42, Config.run (Config.int "X") [("X", "+42")])
       val () = checkResultInt "trailing garbage rejected" (Err [], Config.run (Config.int "X") [("X", "12ab")])
 
+      val () = section "integer bounds (cross-compiler overflow safety)"
+      (* A machine `int` is 32-bit under MLton's default and 63-bit under
+         Poly/ML. `Int.fromString` on an oversized numeral raises Overflow on
+         MLton (a crash, not NONE) and would diverge between compilers. The
+         bounded reader must instead reject out-of-range values gracefully as a
+         malformed `int` -- and NEVER raise -- identically on both compilers. *)
+      val () = check "oversized int never raises"
+                 (let val _ = Config.run (Config.int "X") [("X", "9999999999")] in true end
+                  handle _ => false)
+      val () = checkResultInt "oversized int -> error"
+                 (Err [], Config.run (Config.int "X") [("X", "9999999999")])
+      val () = checkResultInt "20-digit int -> error"
+                 (Err [], Config.run (Config.int "X") [("X", "99999999999999999999")])
+      val () = checkResultInt "Int32 max boundary parses"
+                 (Ok 2147483647, Config.run (Config.int "X") [("X", "2147483647")])
+      val () = checkResultInt "just past Int32 max -> error"
+                 (Err [], Config.run (Config.int "X") [("X", "2147483648")])
+      val () = checkResultInt "Int32 min boundary parses"
+                 (Ok (~2147483648), Config.run (Config.int "X") [("X", "-2147483648")])
+      val () = checkResultInt "just past Int32 min -> error"
+                 (Err [], Config.run (Config.int "X") [("X", "-2147483649")])
+
       val () = section "defaults / optional"
       val () = checkBool "stringOr uses default"
                  (true, (case Config.run (Config.stringOr "MISSING" "fallback") src of Ok "fallback" => true | _ => false))

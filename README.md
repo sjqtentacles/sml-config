@@ -59,6 +59,14 @@ trailing junk (`"12ab"` and `"1.2x"` are rejected). `char` requires exactly one
 character. `oneOf key allowed` is an enum reader. `listOf sep`/`csv` split a
 value and trim each element (an empty value yields `[]`).
 
+`int` produces a machine `int`, whose width is fixed but compiler-dependent
+(32-bit under MLton's default, 63-bit under Poly/ML). To keep behaviour
+identical on both compilers, `int` parses through arbitrary-precision `IntInf`
+and bounds-checks against the fixed 32-bit signed range `[-2147483648,
+2147483647]`: a numeral outside that range is reported as a malformed `int`
+(never crashing), so a value like `"9999999999"` fails gracefully everywhere
+rather than raising `Overflow` on MLton.
+
 ### Combinators
 
 - **Applicative** (`pure`/`map`/`ap`/`both`): error-**accumulating** -- a single
@@ -130,12 +138,14 @@ own `.mlb`, or feed `sources.mlb` to `tools/polybuild` (Poly/ML).
 
 ## Tests
 
-53 deterministic checks: dotenv parsing (comments, blanks, trimming,
+60 deterministic checks: dotenv parsing (comments, blanks, trimming,
 quoting, last-duplicate-wins), strict typed readers (`int`/`real`/`char`),
-signed/negative ints, defaults/`optional`/`withDefault`, applicative error
-accumulation building a record, `oneOf` enums, `listOf`/`csv` splitting,
-`ensure`/`satisfy` validation, `andThen` short-circuiting, `prefixed`/`section`
-scoping, and `unusedKeys` schema checks. Run `make all-tests`.
+signed/negative ints, integer bounds (oversized numerals rejected without
+raising, identically on both compilers), defaults/`optional`/`withDefault`,
+applicative error accumulation building a record, `oneOf` enums,
+`listOf`/`csv` splitting, `ensure`/`satisfy` validation, `andThen`
+short-circuiting, `prefixed`/`section` scoping, and `unusedKeys` schema
+checks. Run `make all-tests`.
 
 ## License
 

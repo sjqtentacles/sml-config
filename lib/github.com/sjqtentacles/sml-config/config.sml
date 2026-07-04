@@ -93,17 +93,33 @@ struct
       | "false" => SOME false | "0" => SOME false | "no" => SOME false | "off" => SOME false
       | _ => NONE
 
-  (* Strict integer: optional leading sign then all digits, non-empty. *)
+  (* Strict integer: optional leading sign then all digits, non-empty.
+
+     Bounds note (cross-compiler): the result is a machine `int`, whose width
+     is FIXED but compiler-dependent -- 32-bit under MLton's default, 63-bit
+     under Poly/ML. `Int.fromString` on an oversized numeral raises Overflow on
+     MLton (crashing the caller) while Poly/ML accepts far larger values, so the
+     two compilers would diverge. We instead parse via `IntInf.fromString`
+     (arbitrary precision, never overflows) and bounds-check against the FIXED
+     32-bit signed range so behaviour is identical everywhere: out-of-range
+     values return NONE (reported as a malformed `int`), never an exception. *)
+  val intMinBound : IntInf.int = ~2147483648
+  val intMaxBound : IntInf.int =  2147483647
   fun parseIntStrict raw =
     let
       val s = trim raw
-      val (sign, digits) =
-        if String.isPrefix "-" s then (~1, String.extract (s, 1, NONE))
-        else if String.isPrefix "+" s then (1, String.extract (s, 1, NONE))
-        else (1, s)
+      val (signStr, digits) =
+        if String.isPrefix "-" s then ("~", String.extract (s, 1, NONE))
+        else if String.isPrefix "+" s then ("", String.extract (s, 1, NONE))
+        else ("", s)
     in
       if digits <> "" andalso CharVector.all Char.isDigit digits
-      then (case Int.fromString digits of SOME n => SOME (sign * n) | NONE => NONE)
+      then (case IntInf.fromString (signStr ^ digits) of
+                SOME n =>
+                  if n >= intMinBound andalso n <= intMaxBound
+                  then SOME (IntInf.toInt n)
+                  else NONE
+              | NONE => NONE)
       else NONE
     end
 
