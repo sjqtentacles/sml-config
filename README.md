@@ -117,6 +117,34 @@ val Config.Ok host = Config.run dbHost src    (* "localhost" *)
 val typos = Config.unusedKeys ["PORT", "HOST"] env
 ```
 
+## Example
+
+`make example` builds and runs [`examples/demo.sml`](examples/demo.sml), which
+parses a dotenv-style source and exercises the typed readers, the applicative
+combinators (`both`/`map`/`ap`), and error accumulation over a missing and a
+malformed key (output is byte-identical under MLton and Poly/ML):
+
+```
+sml-config demo
+
+Basic typed readers:
+  HOST  (string) = localhost
+  PORT  (int)    = 8080
+  DEBUG (bool)   = true
+  RATIO (real)   = 0.50
+  MODE  (oneOf)  = release
+  TAGS  (csv)    = [a,b,c]
+
+Applicative composition (both/ap/map):
+  both HOST PORT = (localhost, 8080)
+  map (address)  = localhost:8080
+  ap (record)    = localhost:8080 debug=true
+
+Error accumulation (missing key + malformed key together):
+  - missing required key: MISSING
+  - key HOST is not a valid int: "localhost"
+```
+
 ## Build & test
 
 ```sh
